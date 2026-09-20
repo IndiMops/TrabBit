@@ -1,0 +1,6 @@
+qbittorrent-api
+feedparser
+python-dotenv
+requests
+bencodepy
+beautifulsoup4
