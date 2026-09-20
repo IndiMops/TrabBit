@@ -1,6 +1,6 @@
-qbittorrent-api
-feedparser
-python-dotenv
-requests
-bencodepy
-beautifulsoup4
+qbittorrent-api>=2026.5
+feedparser>=6.0
+python-dotenv>=1.0
+requests>=2.31
+bencodepy>=0.9
+beautifulsoup4>=4.12

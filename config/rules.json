@@ -1,0 +1,33 @@
+{
+  "default_category": "Anime",
+  "category_paths": {
+    "Anime": ".",
+    "Manga": ".",
+    "Other": "."
+  },
+  "category_rules": [
+    {
+      "category": "Manga",
+      "patterns": ["манг", "manga", "mangaka", "ranobe", "light novel"]
+    },
+    {
+      "category": "Anime",
+      "patterns": ["аніме", "anime", "сезон", "season", "серії", "episode", "ukr/jap", "ukr\\s*/\\s*jap"]
+    }
+  ],
+  "tag_rules": [
+    {"tag": "ukr", "patterns": ["ukr", "україн"]},
+    {"tag": "sub-ukr", "patterns": ["sub\\s*ukr", "субтитр.*укр"]},
+    {"tag": "1080p", "patterns": ["1080p", "1080р"]},
+    {"tag": "720p", "patterns": ["720p", "720р"]},
+    {"tag": "2160p", "patterns": ["2160p", "4k"]},
+    {"tag": "bdrip", "patterns": ["bdrip"]},
+    {"tag": "bdremux", "patterns": ["bdremux"]},
+    {"tag": "web-dl", "patterns": ["web[- ]?dl", "webdl"]},
+    {"tag": "webrip", "patterns": ["webrip"]},
+    {"tag": "dvdrip", "patterns": ["dvdrip"]},
+    {"tag": "hevc", "patterns": ["h\\.265", "hevc"]},
+    {"tag": "h264", "patterns": ["h\\.264", "x264"]},
+    {"tag": "dub-ukr", "patterns": ["озвуч", "укр.*озвуч", "ukr.*dub"]}
+  ]
+}

@@ -1,6 +1,8 @@
 .venv/
-.env
 __pycache__/
-*.pyc
+*.py[cod]
+.env
 manager.db
+manager.db-shm
+manager.db-wal
 debug/

@@ -1,0 +1,13 @@
+[project]
+name = "trabbit-toloka-manager"
+version = "2.0.0"
+description = "Modular Toloka RSS and qBittorrent seed manager"
+requires-python = ">=3.11"
+dependencies = [
+  "qbittorrent-api>=2026.5",
+  "feedparser>=6.0",
+  "python-dotenv>=1.0",
+  "requests>=2.31",
+  "bencodepy>=0.9",
+  "beautifulsoup4>=4.12",
+]
