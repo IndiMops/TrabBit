@@ -10,8 +10,9 @@ import feedparser
 import requests
 from bs4 import BeautifulSoup
 
-from .models import TorrentMeta
+from .models import TopicDetails, TorrentMeta
 from .torrent import parse_torrent
+from .topic_parser import build_detail_tags, parse_topic_page
 from .utils import ensure_dir
 
 log = logging.getLogger("TolokaSeedManager.toloka")
@@ -137,42 +138,32 @@ class TolokaClient:
         log.info("RSS записів отримано: %d", len(feed.entries))
         return feed
 
-    def resolve_torrent_url(self, topic_url: str, topic_id: str | None = None) -> str | None:
+    def fetch_topic_page(self, topic_url: str, topic_id: str | None = None) -> tuple[str | None, TopicDetails]:
+        """Fetch and parse one topic page once. Returns torrent URL + structured metadata."""
         log.info("  Відкриваю тему: %s", topic_url)
         response = self._get(topic_url, headers={"Referer": self.base_url + "/"})
         response.raise_for_status()
-        html = response.text
-        soup = BeautifulSoup(html, "html.parser")
-
-        for link in soup.find_all("a", href=True):
-            href = str(link["href"]).strip()
-            absolute = urljoin(response.url, href)
-            low = absolute.lower()
-            if ".torrent" in low or "download.php" in low:
-                return absolute
-
-        patterns = [
-            r'https?://[^"\'>\s]+download\.php\?[^"\'>\s]+',
-            r'/download\.php\?[^"\'>\s]+',
-            r'https?://[^"\'>\s]+\.torrent[^"\'>\s]*',
-            r'/[^"\'>\s]+\.torrent[^"\'>\s]*',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, html, re.IGNORECASE)
-            if match:
-                return urljoin(response.url, match.group(0))
-
-        for link in soup.find_all("a", href=True):
-            href = str(link["href"]).strip()
-            if href.lower().startswith("magnet:"):
-                return href
+        torrent_url, details = parse_topic_page(response.text, response.url)
 
         if self.debug_enabled:
             ensure_dir(self.debug_dir)
             filename = f"topic_{topic_id or 'unknown'}.html"
-            (self.debug_dir / filename).write_text(html, encoding="utf-8")
-        log.warning("  Не знайшов torrent URL у темі %s", topic_id or "")
-        return None
+            (self.debug_dir / filename).write_text(response.text, encoding="utf-8")
+
+        if torrent_url is None:
+            log.warning("  Не знайшов torrent URL у темі %s", topic_id or "")
+        else:
+            log.info("  Знайдено torrent URL: %s", torrent_url)
+
+        log.debug(
+            "  Topic details: genres=%s country=%s studio=%s quality=%s source=%s translator=%s",
+            details.genres, details.country, details.studio, details.quality, details.source, details.translator,
+        )
+        return torrent_url, details
+
+    def resolve_torrent_url(self, topic_url: str, topic_id: str | None = None) -> str | None:
+        torrent_url, _ = self.fetch_topic_page(topic_url, topic_id)
+        return torrent_url
 
     def download_torrent(self, url: str) -> tuple[bytes, str, int, str, str]:
         if url.lower().startswith("magnet:"):
@@ -193,7 +184,7 @@ class TolokaClient:
         return topic_id, topic_url, title, creator, subject
 
     def fetch_meta(self, topic_id: str, topic_url: str, title: str, creator: str = "", subject: str = "", watched: bool = False, priority: str = "normal") -> TorrentMeta | None:
-        torrent_url = self.resolve_torrent_url(topic_url, topic_id)
+        torrent_url, details = self.fetch_topic_page(topic_url, topic_id)
         if not torrent_url:
             return None
         data, torrent_name, size, fingerprint, info_hash = self.download_torrent(torrent_url)
@@ -211,4 +202,5 @@ class TolokaClient:
             subject=subject,
             watched=watched,
             priority=priority,
+            topic_details=details,
         )

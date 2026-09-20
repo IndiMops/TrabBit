@@ -115,3 +115,44 @@ MANAGED_TAG=trabbit
 IGNORE_TAG=trabbit-ignore
 LEGACY_MANAGED_CATEGORIES=TolokaSeed
 ```
+
+## Topic-page metadata (v2.1)
+
+TrabBit now parses the Toloka topic page that it already needs to visit for the torrent download link. The page is used once per topic and can contribute structured metadata to classification, including:
+
+- age restriction (18+)
+- genres, country, studio and director
+- episode progress and duration
+- quality, video codec, resolution and bitrate
+- audio languages, translation type and codecs
+- subtitle languages, types and formats
+- source and translator
+
+This information is converted into additional tags such as `18plus`, `genre-comedy`, `country-japan`, `studio-asahi-production`, `audio-ukr`, `dub-multivoice`, `sub-ass`, `source-anitube-in-ua` and `translator-aliceinhunterlnd` when the corresponding values are present.
+
+Use the diagnostic command before enabling broad automation:
+
+```powershell
+python main.py --analyze-topic 699103
+```
+
+The command prints the extracted metadata and the resulting category/tags without adding the torrent to qBittorrent.
+
+
+### Deep retagging
+
+Preview deep retagging without changing qBittorrent:
+
+```powershell
+python main.py --retag-existing --deep --dry-run
+```
+
+Deep mode rereads the saved Toloka topic for each managed torrent that has a `topic_id` in SQLite, rebuilds TrabBit-owned tags, and preserves unrelated user tags. Explicit `trabbit-ignore` always wins.
+
+Apply the changes:
+
+```powershell
+python main.py --retag-existing --deep
+```
+
+Deep retagging keeps the normal Toloka request delay and additionally pauses after every `DEEP_RETAG_BATCH_SIZE` topics. The defaults are 20 topics and 30 seconds.

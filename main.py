@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import logging
 import sys
 
@@ -21,6 +22,9 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--watch-remove", metavar="TOPIC", help="Видалити тему з watchlist")
     group.add_argument("--watch-list", action="store_true", help="Показати watchlist")
     group.add_argument("--retag-existing", action="store_true", help="Привести існуючі торренти до нових category/tag правил")
+    parser.add_argument("--deep", action="store_true", help="Для --retag-existing перечитувати сторінки Toloka та перебудовувати metadata")
+    parser.add_argument("--dry-run", action="store_true", help="Примусово ввімкнути dry-run для цього запуску")
+    group.add_argument("--analyze-topic", metavar="TOPIC", help="Проаналізувати сторінку tXXXXX і показати витягнуті metadata/tags")
     parser.add_argument("--priority", choices=["critical", "high", "normal", "low"], default="normal", help="Пріоритет для --watch-add")
     parser.add_argument("--watch-auto-add", action="store_true", help="Увімкнути auto-add для --watch-add")
     parser.add_argument("--watch-auto-update", action="store_true", help="Увімкнути auto-update для --watch-add")
@@ -54,7 +58,11 @@ def print_config(settings) -> None:
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.deep and not args.retag_existing:
+        raise SystemExit("--deep можна використовувати лише разом із --retag-existing")
     settings = load_settings()
+    if args.dry_run:
+        settings = replace(settings, dry_run=True)
     print_config(settings)
 
     settings.save_path.mkdir(parents=True, exist_ok=True)
@@ -88,7 +96,11 @@ def main() -> int:
         manager.login()
 
         if args.retag_existing:
-            manager.retag_existing()
+            manager.retag_existing(deep=args.deep)
+            return 0
+
+        if args.analyze_topic:
+            manager.analyze_topic(args.analyze_topic)
             return 0
 
         processed = manager.process_rss()

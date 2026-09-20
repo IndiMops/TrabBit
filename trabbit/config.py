@@ -52,6 +52,9 @@ class Settings:
     debug_save_html: bool
     debug_dir: Path
 
+    deep_retag_batch_size: int
+    deep_retag_batch_pause: float
+
     def max_bytes(self) -> int:
         return int(self.torrent_limit_gb * 1024**3)
 
@@ -99,4 +102,6 @@ def load_settings(dotenv_path: str | Path = ".env") -> Settings:
         rules_path=Path(os.getenv("RULES_PATH", "config/rules.json")),
         debug_save_html=env_bool("DEBUG_SAVE_HTML", True),
         debug_dir=Path(os.getenv("DEBUG_DIR", "debug")),
+        deep_retag_batch_size=max(1, int(os.getenv("DEEP_RETAG_BATCH_SIZE", "20"))),
+        deep_retag_batch_pause=max(0.0, float(os.getenv("DEEP_RETAG_BATCH_PAUSE", "30"))),
     )

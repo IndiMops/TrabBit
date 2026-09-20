@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import json
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -69,10 +71,16 @@ class Manager:
             subject=meta.subject,
             watched=meta.watched,
             priority=meta.priority,
+            topic_details=meta.topic_details,
         )
 
     def current_managed_size(self) -> int:
-        return self.qbit.managed_size(self.settings.managed_tag, self.settings.qbit_base_path, self.settings.ignore_tag)
+        return self.qbit.managed_size(
+            self.settings.managed_tag,
+            self.settings.qbit_base_path,
+            self.settings.ignore_tag,
+            self.settings.legacy_managed_categories,
+        )
 
     def _decision_for_rss(self, meta: TorrentMeta, qbit_by_hash: dict[str, object]) -> Decision:
         row = self.db.get_rss_item(f"topic:{meta.topic_id}")
@@ -129,6 +137,7 @@ class Manager:
             subject=meta.subject,
             watched=meta.watched,
             priority=meta.priority,
+            topic_details=meta.topic_details,
         )
         save_dir = self.rules.category_path(meta.category, self.settings.qbit_base_path)
 
@@ -483,13 +492,70 @@ class Manager:
                 f"auto_update={bool(row['auto_update'])} | {row['title']}"
             )
 
-    def retag_existing(self) -> None:
-        qbit_torrents = self.qbit.list_torrents()
-        log.info("Retag: знайдено %d торрентів у qBittorrent.", len(qbit_torrents))
+    def analyze_topic(self, topic_input: str) -> None:
+        import re
 
-        managed_count = 0
-        ignored_count = 0
-        skipped_count = 0
+        match = re.search(r"/t(\d+)|^t?(\d+)$", topic_input.strip(), re.IGNORECASE)
+        if not match:
+            raise ValueError("Вкажи tXXXXX або URL теми Toloka.")
+
+        topic_id = match.group(1) or match.group(2)
+        topic_url = f"{self.settings.toloka_base_url}/t{topic_id}"
+        torrent_url, details = self.toloka.fetch_topic_page(topic_url, topic_id)
+        if not torrent_url:
+            raise RuntimeError(f"Не знайдено torrent URL у t{topic_id}.")
+
+        # Downloading the torrent here is intentional: the command is an analysis/debug
+        # command and shows both page-derived and torrent-derived metadata without adding it.
+        data, torrent_name, size, fingerprint, info_hash = self.toloka.download_torrent(torrent_url)
+        meta = TorrentMeta(
+            topic_id=topic_id,
+            topic_url=topic_url,
+            topic_title=torrent_name,
+            torrent_url=torrent_url,
+            torrent_name=torrent_name,
+            data=data,
+            size_bytes=size,
+            fingerprint=fingerprint,
+            info_hash=info_hash,
+            topic_details=details,
+        )
+        self.classify(meta)
+
+        print("\nTopic analysis")
+        print("=" * 80)
+        print(f"Topic:        t{topic_id}")
+        print(f"Torrent:      {torrent_name}")
+        print(f"Size:         {human_size(size)}")
+        print(f"Info hash:    {info_hash}")
+        print(f"Torrent URL:  {torrent_url}")
+        print()
+        print(f"18+:          {details.age_restricted}")
+        print(f"Genres:       {', '.join(details.genres) or '-'}")
+        print(f"Country:      {details.country or '-'}")
+        print(f"Studio:       {details.studio or '-'}")
+        print(f"Director:     {details.director or '-'}")
+        print(f"Quality:      {details.quality or '-'}")
+        print(f"Video codec:  {details.video_codec or '-'}")
+        print(f"Resolution:   {details.video_width or '?'}x{details.video_height or '?'}")
+        print(f"Audio lang:   {', '.join(details.audio_languages) or '-'}")
+        print(f"Audio trans:  {', '.join(details.audio_translations) or '-'}")
+        print(f"Sub lang:     {', '.join(details.subtitle_languages) or '-'}")
+        print(f"Sub formats:  {', '.join(details.subtitle_formats) or '-'}")
+        print(f"Source:       {details.source or '-'}")
+        print(f"Translator:   {details.translator or '-'}")
+        print()
+        print(f"Category:     {meta.category}")
+        print(f"Tags:         {', '.join(meta.tags)}")
+        print("=" * 80)
+
+    def retag_existing(self, *, deep: bool = False) -> None:
+        qbit_torrents = self.qbit.list_torrents()
+        log.info("Retag: знайдено %d торрентів у qBittorrent.%s", len(qbit_torrents), " Deep mode." if deep else "")
+
+        managed_count = ignored_count = skipped_count = deep_skipped = 0
+        batch_count = 0
+        removable_static = self.rules.managed_tag_names(self.settings.managed_tag)
 
         for torrent in qbit_torrents:
             info_hash = str(torrent.hash).lower()
@@ -498,45 +564,45 @@ class Manager:
             current_category = str(getattr(torrent, "category", "") or "").strip()
             current_tags = self.qbit.get_tags(torrent)
 
-            # An explicit ignore tag always wins. This protects unrelated torrents
-            # even when they happen to live in the old TolokaSeed category.
             if self.settings.ignore_tag in current_tags:
                 ignored_count += 1
-                log.info(
-                    "[IGNORED] %s | tag=%s",
-                    title,
-                    self.settings.ignore_tag,
-                )
+                log.info("[IGNORED] %s | tag=%s", title, self.settings.ignore_tag)
                 continue
 
-            # A torrent is considered managed if it was recorded in our DB,
-            # already has the managed tag, or belongs to the legacy TolokaSeed
-            # category from pre-v2 installations. Unrelated torrents are skipped.
             is_managed = (
                 managed is not None
                 or self.settings.managed_tag in current_tags
                 or current_category in self.settings.legacy_managed_categories
             )
-
             if not is_managed:
                 skipped_count += 1
-                log.info(
-                    "[SKIP] %s | category=%s | причина: torrent не належить TrabBit",
-                    title,
-                    current_category or "(none)",
-                )
+                log.info("[SKIP] %s | category=%s | причина: torrent не належить TrabBit", title, current_category or "(none)")
                 continue
 
             managed_count += 1
             topic_id = managed["topic_id"] if managed else None
+            details = None
 
-            if managed:
-                category = managed["category"]
-                tags = __import__("json").loads(managed["tags_json"] or "[]")
-            else:
-                fake = TorrentMeta(
-                    topic_id=topic_id or "",
-                    topic_url="",
+            if deep:
+                if not topic_id:
+                    deep_skipped += 1
+                    log.warning("[SKIP DEEP] %s | немає topic_id у SQLite", title)
+                    continue
+
+                topic_url = f"{self.settings.toloka_base_url}/t{topic_id}"
+                watch = self.db.get_watch(str(topic_id))
+                try:
+                    _, details = self.toloka.fetch_topic_page(topic_url, str(topic_id))
+                except TolokaRateLimitError:
+                    log.error("Deep retag: Toloka rate-limit на t%s. Зупиняю deep scan.", topic_id)
+                    break
+                except Exception:
+                    log.exception("Deep retag: помилка читання t%s", topic_id)
+                    continue
+
+                meta = TorrentMeta(
+                    topic_id=str(topic_id),
+                    topic_url=topic_url,
                     topic_title=title,
                     torrent_url="",
                     torrent_name=title,
@@ -544,40 +610,69 @@ class Manager:
                     size_bytes=int(getattr(torrent, "total_size", 0)),
                     fingerprint="",
                     info_hash=info_hash,
+                    watched=bool(watch and watch["enabled"]),
+                    priority=str(watch["priority"] if watch else "normal"),
+                    topic_details=details,
                 )
-                self.classify(fake)
-                category, tags = fake.category, fake.tags
+                self.classify(meta)
+                category, desired_tags = meta.category, list(dict.fromkeys([self.settings.managed_tag, *meta.tags]))
+                log.info("[DEEP] %s → %s | %s", title, category, ", ".join(desired_tags))
+            else:
+                if managed:
+                    category = managed["category"]
+                    tags = json.loads(managed["tags_json"] or "[]")
+                else:
+                    fake = TorrentMeta(
+                        topic_id=topic_id or "",
+                        topic_url="",
+                        topic_title=title,
+                        torrent_url="",
+                        torrent_name=title,
+                        data=b"",
+                        size_bytes=int(getattr(torrent, "total_size", 0)),
+                        fingerprint="",
+                        info_hash=info_hash,
+                    )
+                    self.classify(fake)
+                    category, tags = fake.category, fake.tags
+                desired_tags = list(dict.fromkeys([self.settings.managed_tag, *tags]))
 
-            tags = list(dict.fromkeys([self.settings.managed_tag, *tags]))
+            removable = set(removable_static) | {tag for tag in current_tags if self.rules.is_managed_dynamic_tag(tag)}
+            to_add = set(desired_tags) - current_tags
+            to_remove = {tag for tag in current_tags if tag in removable and tag not in desired_tags}
 
             if self.settings.dry_run:
-                log.info(
-                    "[DRY RUN] Retag: %s → %s | %s",
-                    title,
+                log.info("[DRY RUN] Retag: %s → %s | +%s | -%s", title, category, ", ".join(sorted(to_add)) or "-", ", ".join(sorted(to_remove)) or "-")
+            else:
+                save_dir = self.rules.category_path(category, self.settings.qbit_base_path)
+                self.qbit.ensure_category(category, save_dir)
+                self.qbit.sync_metadata(
+                    info_hash,
                     category,
-                    ", ".join(tags),
+                    desired_tags,
+                    self.settings.managed_tag,
+                    removable,
+                    dry_run=False,
                 )
-                continue
+                if managed:
+                    self.db.upsert_managed(ManagedTorrent(
+                        info_hash=info_hash,
+                        topic_id=managed["topic_id"],
+                        title=title,
+                        size_bytes=int(getattr(torrent, "total_size", 0)),
+                        category=category,
+                        tags=desired_tags,
+                        source=managed["source"],
+                        added_at=managed["added_at"],
+                        last_seen_at=now_iso(),
+                        qbit_present=True,
+                        status="retagged_deep" if deep else "retagged",
+                    ))
 
-            save_dir = self.rules.category_path(
-                category,
-                self.settings.qbit_base_path,
-            )
-            self.qbit.ensure_category(
-                category,
-                save_dir,
-            )
-            self.qbit.ensure_tags(tags)
-            self.qbit.apply_metadata(
-                info_hash,
-                category,
-                tags,
-                self.settings.managed_tag,
-            )
+            batch_count += 1
+            if deep and batch_count % self.settings.deep_retag_batch_size == 0 and self.settings.deep_retag_batch_pause > 0:
+                log.info("Deep retag: оброблено %d, пауза %.1f с для Toloka.", batch_count, self.settings.deep_retag_batch_pause)
+                time.sleep(self.settings.deep_retag_batch_pause)
 
-        log.info(
-            "Retag: завершено. managed=%d, ignored=%d, skipped=%d.",
-            managed_count,
-            ignored_count,
-            skipped_count,
-        )
+        log.info("Retag: завершено. managed=%d, ignored=%d, skipped=%d, deep_skipped=%d.", managed_count, ignored_count, skipped_count, deep_skipped)
+

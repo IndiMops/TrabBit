@@ -72,18 +72,29 @@ class QBitClient:
         except OSError:
             return False
 
-    def managed_torrents(self, managed_tag: str, base_path: Path | None = None, ignore_tag: str | None = None) -> list[object]:
+    def managed_torrents(
+        self,
+        managed_tag: str,
+        base_path: Path | None = None,
+        ignore_tag: str | None = None,
+        legacy_categories: Iterable[str] | None = None,
+    ) -> list[object]:
         result: list[object] = []
+        legacy_categories = set(legacy_categories or ())
         for torrent in self.list_torrents():
             tags = normalize_qbit_tags(getattr(torrent, "tags", ""))
             if ignore_tag and ignore_tag in tags:
                 continue
-            if managed_tag in tags:
+
+            category = str(getattr(torrent, "category", "") or "").strip()
+            managed = (
+                managed_tag in tags
+                or (category in legacy_categories if legacy_categories else False)
+            )
+
+            if managed:
                 result.append(torrent)
-            elif base_path is not None and self._is_under_base_path(str(getattr(torrent, "save_path", "")), base_path):
-                # Count legacy torrents in the managed folder too. This prevents
-                # a v2 migration from accidentally exceeding the storage limit.
-                result.append(torrent)
+
         return result
 
     def managed_size(
@@ -91,6 +102,7 @@ class QBitClient:
         managed_tag: str,
         base_path: Path | None = None,
         ignore_tag: str | None = None,
+        legacy_categories: Iterable[str] | None = None,
     ) -> int:
         return sum(
             int(getattr(t, "total_size", 0))
@@ -98,6 +110,7 @@ class QBitClient:
                 managed_tag,
                 base_path,
                 ignore_tag,
+                legacy_categories,
             )
         )
 
@@ -163,6 +176,47 @@ class QBitClient:
             tags=list(dict.fromkeys([managed_tag, *tags])),
             torrent_hashes=info_hash,
         )
+
+    def sync_metadata(
+        self,
+        info_hash: str,
+        category: str,
+        desired_tags: Iterable[str],
+        managed_tag: str,
+        removable_managed_tags: Iterable[str],
+        dry_run: bool = False,
+    ) -> tuple[set[str], set[str]]:
+        """Rebuild TrabBit-owned metadata while preserving unrelated user tags."""
+        desired = set(tag for tag in [managed_tag, *desired_tags] if tag)
+        torrent = self.get_torrents_by_hash().get(info_hash.lower())
+        if torrent is None:
+            raise ValueError(f"Torrent {info_hash} не знайдений у qBittorrent.")
+
+        current = self.get_tags(torrent)
+        removable = set(removable_managed_tags)
+        to_remove = {tag for tag in current if tag in removable and tag not in desired}
+        to_add = desired - current
+
+        if dry_run:
+            return to_add, to_remove
+
+        self.ensure_tags(desired)
+        self.client.torrents_set_category(
+            category=category,
+            torrent_hashes=info_hash,
+        )
+        if to_remove:
+            self.client.torrent_tags.remove_tags(
+                tags=sorted(to_remove),
+                torrent_hashes=info_hash,
+            )
+        if to_add:
+            self.client.torrent_tags.add_tags(
+                tags=sorted(to_add),
+                torrent_hashes=info_hash,
+            )
+
+        return to_add, to_remove
 
     def delete_torrent(self, info_hash: str, delete_files: bool = False, dry_run: bool = False) -> None:
         if dry_run:
