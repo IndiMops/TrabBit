@@ -156,3 +156,43 @@ python main.py --retag-existing --deep
 ```
 
 Deep retagging keeps the normal Toloka request delay and additionally pauses after every `DEEP_RETAG_BATCH_SIZE` topics. The defaults are 20 topics and 30 seconds.
+
+## Windows tray / background mode
+
+TrabBit можна запускати як фоновий застосунок Windows без відкритої консолі:
+
+```powershell
+.\.venv\Scripts\pythonw.exe main.py --tray
+```
+
+У треї доступні: ручна перевірка RSS/watchlist, пауза автоматичних перевірок, перегляд зайнятого сховища, відкриття qBittorrent, журналу, теки TrabBit та теки завантаження торентів. Watchlist також можна додавати або видаляти з меню. Фонові операції створюють власний Manager у своєму потоці, тому SQLite не ділиться одним thread-bound connection між tray і worker.
+
+Параметри фонового режиму задаються в `.env`:
+
+```dotenv
+TRAY_POLL_INTERVAL_MINUTES=30
+TRAY_START_DELAY_SECONDS=15
+```
+
+`TRAY_START_DELAY_SECONDS` потрібен, щоб qBittorrent встиг запустити WebUI після входу Windows.
+
+### Автозапуск
+
+1. Переконайся, що `.venv` створено та залежності встановлено.
+2. Запусти `install_autostart.bat`.
+3. Після наступного входу у Windows TrabBit автоматично стартуватиме у треї.
+4. Для вимкнення автозапуску запусти `uninstall_autostart.bat`.
+
+CLI залишається для спеціальних операцій, наприклад:
+
+```powershell
+python main.py --watch-list
+python main.py --retag-existing
+python main.py --retag-existing --deep
+python main.py --analyze-topic 699103
+```
+
+
+### Retention safety guards
+
+TrabBit will never propose a managed torrent for retention deletion while its qBittorrent ratio is below `MIN_SEED_RATIO` (default `0.15`). By default it also never proposes a torrent that currently has active leechers (`RETENTION_PROTECT_ACTIVE_LEECHERS=true`). These are hard guards, not score bonuses/penalties.

@@ -105,6 +105,24 @@ class ManagedTorrent:
     status: str = "seen"
 
 
+@dataclass
+class RetentionCandidate:
+    info_hash: str
+    topic_id: str | None
+    title: str
+    size_bytes: int
+    score: float
+    reason: str
+    ratio: float
+    popularity: float
+    num_seeds: int
+    num_leechs: int
+    added_on: int
+    last_activity: int
+    superseded: bool = False
+    delete_files: bool = True
+
+
 def torrent_from_row(row: Any) -> ManagedTorrent:
     import json
 
