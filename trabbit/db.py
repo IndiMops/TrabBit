@@ -208,6 +208,25 @@ class Database:
     def all_managed(self) -> list[sqlite3.Row]:
         return list(self.conn.execute("SELECT * FROM managed_torrents").fetchall())
 
+    def mark_topic_superseded(self, topic_id: str, keep_hash: str) -> int:
+        cursor = self.conn.execute(
+            """
+            UPDATE managed_torrents
+               SET status='superseded', last_seen_at=?
+             WHERE topic_id=? AND info_hash<>? AND qbit_present=1
+            """,
+            (now_iso(), topic_id, keep_hash.lower()),
+        )
+        self.conn.commit()
+        return cursor.rowcount
+
+    def mark_managed_deleted(self, info_hash: str) -> None:
+        self.conn.execute(
+            "UPDATE managed_torrents SET qbit_present=0, status='deleted', last_seen_at=? WHERE info_hash=?",
+            (now_iso(), info_hash.lower()),
+        )
+        self.conn.commit()
+
     # ---------- Watchlist ----------
     def get_watch(self, topic_id: str) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM watchlist WHERE topic_id = ?", (topic_id,)).fetchone()

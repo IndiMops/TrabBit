@@ -30,6 +30,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--watch-auto-update", action="store_true", help="Увімкнути auto-update для --watch-add")
     parser.add_argument("--watch-interval", type=int, default=1440, help="Інтервал watchlist у хвилинах")
     parser.add_argument("--no-watchlist", action="store_true", help="Не перевіряти watchlist у цьому запуску")
+    parser.add_argument("--retention-report", action="store_true", help="Показати кандидатів на очищення сховища")
+    parser.add_argument("--tray", action="store_true", help="Запустити фоновий TrabBit у Windows tray")
     return parser
 
 
@@ -53,6 +55,8 @@ def print_config(settings) -> None:
     print(f"Ignore tag:         {settings.ignore_tag}")
     print(f"Legacy categories:  {", ".join(settings.legacy_managed_categories) or "(none)"}")
     print(f"Toloka delay:       {settings.toloka_request_delay:.1f} s")
+    print(f"MIN_SEED_RATIO:     {settings.min_seed_ratio:.2f}")
+    print(f"Protect leechers:   {'YES' if settings.protect_active_leechers else 'NO'}")
     print()
 
 
@@ -60,6 +64,10 @@ def main() -> int:
     args = build_parser().parse_args()
     if args.deep and not args.retag_existing:
         raise SystemExit("--deep можна використовувати лише разом із --retag-existing")
+    if args.tray:
+        from tray import run_tray
+        return run_tray()
+
     settings = load_settings()
     if args.dry_run:
         settings = replace(settings, dry_run=True)
@@ -103,9 +111,24 @@ def main() -> int:
             manager.analyze_topic(args.analyze_topic)
             return 0
 
-        processed = manager.process_rss()
-        if not args.no_watchlist:
-            manager.process_watchlist(processed)
+        if args.retention_report:
+            candidates = manager.scan_retention_candidates()
+            print("\nRetention candidates")
+            print("=" * 110)
+            if not candidates:
+                print("Немає кандидатів на видалення.")
+                return 0
+            for item in candidates:
+                print(
+                    f"score={item.score:5.1f} | {item.size_bytes / 1024**3:6.2f} GiB | "
+                    f"ratio={item.ratio:6.2f} | pop={item.popularity:7.2f} | "
+                    f"S/L={item.num_seeds}/{item.num_leechs} | "
+                    f"files={'YES' if item.delete_files else 'NO '} | t{item.topic_id or '-'} | "
+                    f"{item.title}\n  {item.reason}"
+                )
+            return 0
+
+        result = manager.run_cycle(include_watchlist=not args.no_watchlist)
         return 0
 
     except Exception as exc:

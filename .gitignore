@@ -6,3 +6,4 @@ manager.db
 manager.db-shm
 manager.db-wal
 debug/
+trabbit.log

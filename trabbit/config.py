@@ -55,6 +55,12 @@ class Settings:
     deep_retag_batch_size: int
     deep_retag_batch_pause: float
 
+    retention_min_age_days: int
+    retention_score_threshold: float
+    retention_scan_enabled: bool
+    min_seed_ratio: float
+    protect_active_leechers: bool
+
     def max_bytes(self) -> int:
         return int(self.torrent_limit_gb * 1024**3)
 
@@ -104,4 +110,9 @@ def load_settings(dotenv_path: str | Path = ".env") -> Settings:
         debug_dir=Path(os.getenv("DEBUG_DIR", "debug")),
         deep_retag_batch_size=max(1, int(os.getenv("DEEP_RETAG_BATCH_SIZE", "20"))),
         deep_retag_batch_pause=max(0.0, float(os.getenv("DEEP_RETAG_BATCH_PAUSE", "30"))),
+        retention_min_age_days=max(0, int(os.getenv("RETENTION_MIN_AGE_DAYS", "14"))),
+        retention_score_threshold=float(os.getenv("RETENTION_SCORE_THRESHOLD", "35")),
+        retention_scan_enabled=env_bool("RETENTION_SCAN_ENABLED", True),
+        min_seed_ratio=max(0.0, float(os.getenv("MIN_SEED_RATIO", "0.15"))),
+        protect_active_leechers=env_bool("RETENTION_PROTECT_ACTIVE_LEECHERS", True),
     )

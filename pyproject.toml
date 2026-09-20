@@ -10,4 +10,6 @@ dependencies = [
   "requests>=2.31",
   "bencodepy>=0.9",
   "beautifulsoup4>=4.12",
+  "pystray>=0.19.5",
+  "Pillow>=10.0",
 ]
